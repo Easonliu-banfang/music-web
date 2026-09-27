@@ -436,9 +436,13 @@ input { font-family: inherit; }
 
 <script>
 // ========== Config ==========
-// API 后端地址。默认走同域 /_api 前缀（用于 Cloudflare Pages Functions 或本地 server.py）。
-// 如果你想直连其他代理，改这个即可。
-const API_BASE = '';  // 同域：'' 或者 'http://127.0.0.1:8765' 或 'https://xxx.pages.dev'
+// API 后端地址。
+// 本地（127.0.0.1 / localhost）走同域 server.py；线上（GitHub Pages 静态站）走 Cloudflare Worker 代理。
+// 部署 Worker 后，把下面的 YOUR_SUBDOMAIN 换成你的 Cloudflare 子域
+// （一般是 17721266011，执行 `wrangler deploy` 后输出里能看到真实地址，确认后改这里即可）。
+const API_BASE = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+  ? ''   // 本地
+  : 'https://music-web-api.YOUR_SUBDOMAIN.workers.dev';  // 线上 Worker
 
 // 仅保留 itzo.cn 实测仍可用的音源；其余（QQ/酷狗/酷我/咪咕/百度/虾米）上游接口已 404，列为僵尸源已移除。
 const SOURCES = [
