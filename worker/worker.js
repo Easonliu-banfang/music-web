@@ -1,10 +1,14 @@
 // 音乐盒子 · API 代理 Worker
 // 作用：替浏览器去 itzo.cn 搜歌 + 代理音频流（解决 CORS / HTTPS 混合内容 / Range 拖动）
-// 部署：在 worker/ 目录执行 `wrangler deploy`（需要 CLOUDFLARE_API_TOKEN）
+// 部署：在 worker/ 目录执行 `wrangler deploy`（已通过 wrangler login 拿到 OAuth 凭据）
 //
 // 前端（GitHub Pages 静态站）通过以下两个端点调用本 Worker：
-//   POST /_api/search?input=...&filter=...&type=...&page=...   -> 转发到 itzo.cn
-//   GET  /_api/audio?url=<encoded 直链>                        -> 代理音频（带 CORS + Range）
+//   GET /_api/search?input=...&filter=name|id&type=netease|1ting&page=1  -> 转发到 itzo.cn
+//   GET /_api/audio?url=<encoded 直链>                                  -> 代理音频（带 CORS + Range）
+//
+// 注意：前端用 GET + query 参数；本 Worker 内部把 search 转成 itzo 要的
+// POST application/x-www-form-urlencoded 表单。itzo 契约：
+//   filter = 搜索方式（name/id/url），type = 音源平台（netease/1ting/...）
 
 const ITZO = 'https://music.itzo.cn/';
 
@@ -24,6 +28,16 @@ function corsResponse(body, status = 200, extra = {}) {
   return new Response(body, { status, headers: { ...CORS, ...extra } });
 }
 
+// 把前端的 input/filter/type/page 组装成 itzo 要的表单 body
+function buildItzoBody(params) {
+  const input = params.get('input') || '';
+  const filter = params.get('filter') || 'name';
+  const type = params.get('type') || 'netease';
+  const page = params.get('page') || '1';
+  const enc = (s) => encodeURIComponent(s);
+  return `input=${enc(input)}&filter=${enc(filter)}&type=${enc(type)}&page=${enc(page)}`;
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -32,8 +46,17 @@ export default {
     if (request.method === 'OPTIONS') return corsResponse(null, 204);
 
     // ---------- 搜索 ----------
-    if (url.pathname === '/_api/search' && request.method === 'POST') {
-      const body = await request.text();
+    if (url.pathname === '/_api/search') {
+      // 支持 GET(query) 与 POST(body)，统一转成 itzo 的 POST 表单
+      let params;
+      if (request.method === 'POST') {
+        const text = await request.text();
+        params = new URLSearchParams(text);
+      } else {
+        params = url.searchParams;
+      }
+
+      const body = buildItzoBody(params);
       const upstream = await fetch(ITZO, {
         method: 'POST',
         headers: {
@@ -54,12 +77,16 @@ export default {
 
     // ---------- 音频代理（流式，不缓冲） ----------
     if (url.pathname === '/_api/audio') {
-      const target = url.searchParams.get('url');
-      if (!target) {
+      const raw = url.searchParams.get('url');
+      if (!raw) {
         return corsResponse(JSON.stringify({ error: 'missing url' }), 400, {
           'Content-Type': 'application/json',
         });
       }
+
+      // Cloudflare Worker 子请求只允许 HTTPS；itzo 返回的是 http:// 直链，统一升级
+      let target = raw;
+      if (target.startsWith('http://')) target = 'https://' + target.slice(7);
 
       // 网易云需要带自己的 Referer，否则 outer/url 会跳 404
       const referer = target.includes('163.com')

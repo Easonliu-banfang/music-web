@@ -85,10 +85,44 @@ class MusicHandler(SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length) if length else b""
             content_type = self.headers.get("Content-Type", "application/x-www-form-urlencoded")
+            return self._proxy_itzo(body, content_type)
+        except Exception as e:
+            self._send_error_json(500, str(e))
 
+    # ---------- Proxy: /_api/search (统一入口，前端用 GET + query) ----------
+    def handle_api_get(self):
+        """GET /_api/* 统一入口：前端走 GET + query 参数"""
+        if self.path.startswith("/_api/search"):
+            return self.handle_search_get()
+        if self.path.startswith("/_api/audio"):
+            return self.handle_audio_get()
+        return self.send_error(404, "Unknown endpoint")
+
+    def handle_search_get(self):
+        """GET /_api/search?input=...&filter=name&type=netease&page=1 -> POST itzo"""
+        try:
+            parsed = urlparse(self.path)
+            qs = parse_qs(parsed.query)
+            input_val = qs.get("input", [""])[0]
+            filter_val = qs.get("filter", ["name"])[0]
+            type_val = qs.get("type", ["netease"])[0]
+            page_val = qs.get("page", ["1"])[0]
+            body = (
+                "input=" + urllib.parse.quote(input_val, safe="") +
+                "&filter=" + urllib.parse.quote(filter_val, safe="") +
+                "&type=" + urllib.parse.quote(type_val, safe="") +
+                "&page=" + urllib.parse.quote(page_val, safe="")
+            )
+            return self._proxy_itzo(body, "application/x-www-form-urlencoded; charset=UTF-8")
+        except Exception as e:
+            self._send_error_json(500, str(e))
+
+    def _proxy_itzo(self, body, content_type):
+        """真正把请求 POST 给 itzo.cn 并把 JSON 透传回去（search 共用）"""
+        try:
             req = urllib.request.Request(
                 ITZO_API,
-                data=body,
+                data=body.encode("utf-8") if isinstance(body, str) else body,
                 method="POST",
                 headers={
                     "Content-Type": content_type,
@@ -116,11 +150,8 @@ class MusicHandler(SimpleHTTPRequestHandler):
             self._send_error_json(500, str(e))
 
     # ---------- Proxy: /_api/audio?url=<encoded> ----------
-    def handle_api_get(self):
+    def handle_audio_get(self):
         """GET /_api/audio?url=... -> GET url (with CORS + streaming)"""
-        if not self.path.startswith("/_api/audio"):
-            return self.send_error(404, "Unknown endpoint")
-
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         target_url = qs.get("url", [None])[0]

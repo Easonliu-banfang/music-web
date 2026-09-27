@@ -442,7 +442,7 @@ input { font-family: inherit; }
 // （一般是 17721266011，执行 `wrangler deploy` 后输出里能看到真实地址，确认后改这里即可）。
 const API_BASE = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
   ? ''   // 本地
-  : 'https://music-web-api.YOUR_SUBDOMAIN.workers.dev';  // 线上 Worker
+  : 'https://eason-musicbox.pages.dev';  // 线上：pages.dev 干净入口 -> 反代 Worker（绕过 workers.dev 国内投毒）
 
 // 仅保留 itzo.cn 实测仍可用的音源；其余（QQ/酷狗/酷我/咪咕/百度/虾米）上游接口已 404，列为僵尸源已移除。
 const SOURCES = [
@@ -658,7 +658,8 @@ function updatePlayerInfo(song) {
   lyricsTitle.textContent = song.title || '未命名';
   lyricsSubtitle.textContent = song.author || '未知';
   if (song.pic) {
-    playerCover.src = song.pic;
+    // itzo 的 pic 是 http:// ，GitHub Pages(https) 下属混合内容会被拦；升级为 https
+    playerCover.src = song.pic.replace(/^http:\/\//, 'https://');
     playerCover.onerror = () => { playerCover.src = 'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2252%22 height=%2252%22><rect width=%2252%22 height=%2252%22 fill=%22%23242433%22/><text x=%2226%22 y=%2234%22 font-size=%2224%22 text-anchor=%22middle%22 fill=%22%23666%22>♪</text></svg>'; };
   }
   document.title = `♪ ${song.title} - ${song.author}`;
