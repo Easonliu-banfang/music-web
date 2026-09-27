@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>音乐盒子 · 多音源聚合</title>
+<style>
+:root {
+  --bg: #0f0f14;
+  --bg-2: #16161d;
+  --panel: #1c1c26;
+  --panel-2: #242433;
+  --border: rgba(255,255,255,.08);
+  --text: #e8e8ee;
+  --text-2: #a0a0b0;
+  --accent: #ff4d6d;
+  --accent-2: #8b5cf6;
+  --grad: linear-gradient(135deg, #ff4d6d 0%, #8b5cf6 100%);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(139,92,246,.15), transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(255,77,109,.12), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input { font-family: inherit; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; position: relative; z-index: 1; }
+
+/* Header */
+.header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 20px;
+  background: rgba(15,15,20,.7);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; white-space: nowrap; }
+.logo-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: var(--grad);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+}
+.search-wrap {
+  flex: 1;
+  display: flex; gap: 8px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  min-width: 0;
+}
+.search-input::placeholder { color: var(--text-2); }
+.source-tabs { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; }
+.source-tab {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  transition: all .2s;
+  white-space: nowrap;
+}
+.source-tab:hover { color: var(--text); background: var(--panel-2); }
+.source-tab.active { background: var(--grad); color: white; font-weight: 600; }
+.source-tab.disabled { opacity: .4; cursor: not-allowed; }
+.search-btn {
+  padding: 8px 16px;
+  background: var(--grad);
+  color: white;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: transform .15s;
+  white-space: nowrap;
+}
+.search-btn:hover:not(:disabled) { transform: scale(1.03); }
+.search-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Main */
+.main { display: grid; grid-template-columns: 1fr 360px; overflow: hidden; }
+.content { overflow-y: auto; padding: 20px; }
+
+.result-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 14px;
+  color: var(--text-2); font-size: 13px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.result-count { color: var(--text-2); }
+.result-hint { color: var(--text-2); font-size: 12px; }
+
+.result-list { display: flex; flex-direction: column; gap: 4px; }
+.result-item {
+  display: grid;
+  grid-template-columns: 32px 56px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: background .15s;
+  cursor: pointer;
+  position: relative;
+}
+.result-item:hover { background: var(--panel); }
+.result-item.playing { background: var(--panel-2); }
+.result-item.playing .title { color: var(--accent); }
+.result-item.error .title { color: #ff6b6b; }
+
+.rk { color: var(--text-2); font-size: 13px; text-align: center; font-variant-numeric: tabular-nums; }
+.result-item.playing .rk { color: var(--accent); }
+.cover {
+  width: 56px; height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--panel);
+}
+.song-info { overflow: hidden; min-width: 0; }
+.title {
+  font-size: 14px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.subtitle {
+  font-size: 12px; color: var(--text-2);
+  margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.action { display: flex; gap: 8px; opacity: 0; transition: opacity .15s; }
+.result-item:hover .action { opacity: 1; }
+.icon-btn {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2);
+  transition: all .15s;
+  text-decoration: none;
+  font-size: 14px;
+}
+.icon-btn:hover { background: var(--accent); color: white; }
+
+.empty { padding: 80px 20px; text-align: center; color: var(--text-2); }
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
+.empty-tip { font-size: 14px; margin-bottom: 6px; }
+.empty-sub { font-size: 12px; opacity: .8; }
+.empty-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.tag-btn {
+  padding: 6px 12px;
+  background: var(--panel);
+  border-radius: 16px;
+  font-size: 12px;
+  color: var(--text);
+  transition: all .15s;
+}
+.tag-btn:hover { background: var(--panel-2); }
+
+.loading {
+  display: flex; align-items: center; justify-content: center;
+  padding: 60px;
+  color: var(--text-2);
+  gap: 10px;
+}
+.spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Lyrics */
+.lyrics-panel {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.lyrics-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.lyrics-title { font-weight: 600; font-size: 14px; }
+.lyrics-subtitle { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.lyrics-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  scroll-behavior: smooth;
+}
+.lyric-line {
+  padding: 10px 0;
+  font-size: 15px;
+  color: var(--text-2);
+  transition: all .3s;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.lyric-line.active {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 17px;
+  transform: scale(1.02);
+}
+.lyric-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* Player */
+.player {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 12px 20px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 20px;
+  align-items: center;
+}
+.player-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.player-cover {
+  width: 52px; height: 52px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--panel-2);
+  flex-shrink: 0;
+  animation: spinSlow 20s linear infinite;
+}
+.player-cover.paused { animation: none; }
+@keyframes spinSlow { to { transform: rotate(360deg); } }
+.player-info { overflow: hidden; min-width: 0; }
+.player-title {
+  font-size: 14px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.player-artist {
+  font-size: 12px; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.player-center { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 380px; max-width: 100%; }
+.controls { display: flex; align-items: center; gap: 14px; }
+.ctrl-btn {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text);
+  transition: all .15s;
+  font-size: 16px;
+}
+.ctrl-btn:hover { color: var(--accent); }
+.play-btn {
+  width: 44px; height: 44px;
+  background: var(--grad);
+  color: white;
+  border-radius: 50%;
+}
+.play-btn:hover { color: white; transform: scale(1.05); }
+
+.progress-wrap {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+}
+.progress {
+  flex: 1;
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--grad);
+  border-radius: 2px;
+  width: 0%;
+  transition: width .1s linear;
+}
+
+.player-right { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.vol-wrap { display: flex; align-items: center; gap: 8px; }
+.vol-btn { color: var(--text-2); cursor: pointer; padding: 4px; font-size: 16px; }
+.vol-btn:hover { color: var(--text); }
+.vol-slider {
+  width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--panel-2);
+  border-radius: 2px;
+  outline: none;
+}
+.vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.92);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 13px;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s, transform .3s;
+  max-width: 90vw;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(-8px); }
+
+/* Mobile */
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .lyrics-panel { display: none; }
+  .source-tabs { display: none; }
+  .player { grid-template-columns: auto 1fr auto; padding: 8px 12px; gap: 10px; }
+  .player-center { width: 100%; }
+  .vol-wrap { display: none; }
+  .result-item { grid-template-columns: 28px 44px 1fr; padding: 8px 10px; }
+  .cover { width: 44px; height: 44px; }
+  .action { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">🎵</div>
+      <span>音乐盒子</span>
+    </div>
+    <div class="search-wrap">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索歌名 / 歌手 / 歌曲ID..." value="">
+      <div class="source-tabs" id="sourceTabs"></div>
+      <button class="search-btn" id="searchBtn">搜索</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="content" id="content">
+      <div class="empty">
+        <div class="empty-icon">🎧</div>
+        <div class="empty-tip">音乐盒子 · 多音源聚合搜索</div>
+        <div class="empty-sub">搜索你喜欢的歌曲，点击即播</div>
+        <div class="empty-actions" id="suggestActions"></div>
+      </div>
+    </section>
+
+    <aside class="lyrics-panel">
+      <div class="lyrics-header">
+        <div class="lyrics-title" id="lyricsTitle">未在播放</div>
+        <div class="lyrics-subtitle" id="lyricsSubtitle">搜索并点击歌曲开始</div>
+      </div>
+      <div class="lyrics-body" id="lyricsBody">
+        <div class="lyric-empty">播放后显示歌词</div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="player">
+    <div class="player-left">
+      <img class="player-cover paused" id="playerCover" alt="" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='52' height='52'><rect width='52' height='52' fill='%23242433'/><text x='26' y='34' font-size='24' text-anchor='middle' fill='%23666'>♪</text></svg>">
+      <div class="player-info">
+        <div class="player-title" id="playerTitle">未在播放</div>
+        <div class="player-artist" id="playerArtist">—</div>
+      </div>
+    </div>
+
+    <div class="player-center">
+      <div class="controls">
+        <button class="ctrl-btn" id="prevBtn" title="上一首">⏮</button>
+        <button class="ctrl-btn play-btn" id="playBtn" title="播放/暂停 (空格)">▶</button>
+        <button class="ctrl-btn" id="nextBtn" title="下一首">⏭</button>
+      </div>
+      <div class="progress-wrap">
+        <span id="currentTime">0:00</span>
+        <div class="progress" id="progress">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <span id="totalTime">0:00</span>
+      </div>
+    </div>
+
+    <div class="player-right">
+      <div class="vol-wrap">
+        <span class="vol-btn" id="volBtn">🔊</span>
+        <input type="range" class="vol-slider" id="volSlider" min="0" max="1" step="0.01" value="0.7">
+      </div>
+    </div>
+  </footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ========== Config ==========
+// API 后端地址。默认走同域 /_api 前缀（用于 Cloudflare Pages Functions 或本地 server.py）。
+// 如果你想直连其他代理，改这个即可。
+const API_BASE = '';  // 同域：'' 或者 'http://127.0.0.1:8765' 或 'https://xxx.pages.dev'
+
+// 仅保留 itzo.cn 实测仍可用的音源；其余（QQ/酷狗/酷我/咪咕/百度/虾米）上游接口已 404，列为僵尸源已移除。
+const SOURCES = [
+  { key: 'netease', label: '网易', enabled: true, note: '主要音源' },
+  { key: '1ting',   label: '一听', enabled: true, note: '备用音源' },
+];
+
+const DEFAULT_SOURCE = 'netease';
+
+// ========== State ==========
+const state = {
+  results: [],
+  current: -1,
+  currentSource: DEFAULT_SOURCE,
+  playing: false,
+  lyrics: [],
+  lyricIndex: -1,
+  volume: 0.7,
+  loading: false,
+};
+
+const audio = new Audio();
+audio.volume = state.volume;
+audio.preload = 'metadata';
+
+// ========== DOM ==========
+const $ = id => document.getElementById(id);
+const searchInput = $('searchInput');
+const searchBtn = $('searchBtn');
+const sourceTabs = $('sourceTabs');
+const content = $('content');
+const lyricsBody = $('lyricsBody');
+const lyricsTitle = $('lyricsTitle');
+const lyricsSubtitle = $('lyricsSubtitle');
+const playerTitle = $('playerTitle');
+const playerArtist = $('playerArtist');
+const playerCover = $('playerCover');
+const playBtn = $('playBtn');
+const prevBtn = $('prevBtn');
+const nextBtn = $('nextBtn');
+const progress = $('progress');
+const progressFill = $('progressFill');
+const currentTime = $('currentTime');
+const totalTime = $('totalTime');
+const volSlider = $('volSlider');
+const volBtn = $('volBtn');
+const toastEl = $('toast');
+const suggestActions = $('suggestActions');
+
+// ========== Build API URL ==========
+function apiPath(path, params = {}) {
+  const url = new URL(API_BASE + '/' + path.replace(/^\//, ''));
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) url.searchParams.set(k, v);
+  }
+  return url.toString();
+}
+
+// ========== Init ==========
+function renderSourceTabs() {
+  sourceTabs.innerHTML = SOURCES.map(s =>
+    `<button class="source-tab ${s.key === state.currentSource ? 'active' : ''} ${s.enabled ? '' : 'disabled'}"
+      data-src="${s.key}" title="${s.note}">${s.label}</button>`
+  ).join('');
+  sourceTabs.querySelectorAll('.source-tab').forEach(el => {
+    el.addEventListener('click', () => {
+      if (el.classList.contains('disabled')) return;
+      state.currentSource = el.dataset.src;
+      renderSourceTabs();
+    });
+  });
+}
+
+function renderSuggests() {
+  const tags = ['周杰伦', '陈奕迅', '五月天', '邓紫棋', '林俊杰', '毛不易', 'lofi', '安静', '晴天', '光年之外'];
+  suggestActions.innerHTML = tags.map(t =>
+    `<button class="tag-btn" data-tag="${t}">${t}</button>`
+  ).join('');
+  suggestActions.querySelectorAll('.tag-btn').forEach(el => {
+    el.addEventListener('click', async () => {
+      searchInput.value = el.dataset.tag;
+      await doSearch();
+    });
+  });
+}
+
+// ========== Search ==========
+async function doSearch() {
+  const q = searchInput.value.trim();
+  if (!q) { toast('请输入搜索内容'); return; }
+
+  state.loading = true;
+  searchBtn.disabled = true;
+  searchBtn.textContent = '搜索中...';
+  content.innerHTML = '<div class="loading"><div class="spinner"></div>正在搜索...</div>';
+  audio.pause();
+
+  try {
+    const url = apiPath('/_api/search', {
+      input: q,
+      filter: /^[a-zA-Z0-9|\/]+$/.test(q) ? 'id' : 'name',
+      type: state.currentSource,
+      page: '1'
+    });
+
+    const res = await fetch(url, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    if (data.code !== 200 || !data.data) {
+      content.innerHTML = renderEmpty('没有找到相关歌曲', `源: ${SOURCES.find(s => s.key === state.currentSource).label} · 试试其他源`);
+      return;
+    }
+
+    state.results = data.data.filter(x => x && x.url && x.url.startsWith('http'));
+    if (state.results.length === 0) {
+      content.innerHTML = renderEmpty('该源没有可播放的结果', '试试切换到其他源');
+      return;
+    }
+
+    renderResults();
+    playSong(0);
+  } catch (err) {
+    console.error(err);
+    content.innerHTML = renderEmpty('搜索失败', err.message + '（可能是后端未启动）');
+  } finally {
+    state.loading = false;
+    searchBtn.disabled = false;
+    searchBtn.textContent = '搜索';
+  }
+}
+
+function renderEmpty(title, subtitle) {
+  return `
+    <div class="empty">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-tip">${escapeHtml(title)}</div>
+      ${subtitle ? `<div class="empty-sub">${escapeHtml(subtitle)}</div>` : ''}
+    </div>`;
+}
+
+function renderResults() {
+  const src = SOURCES.find(s => s.key === state.currentSource);
+  content.innerHTML = `
+    <div class="result-header">
+      <span class="result-count">音源: <b style="color:var(--accent)">${src.label}</b> · 共 ${state.results.length} 首</span>
+      <span class="result-hint">💡 点击播放 · 空格 播放/暂停 · ↑↓ 切歌 · ←→ 快退/快进</span>
+    </div>
+    <div class="result-list">
+      ${state.results.map((s, i) => `
+        <div class="result-item ${i === state.current ? 'playing' : ''}" data-idx="${i}">
+          <div class="rk">${i + 1}</div>
+          <img class="cover" src="${escapeAttr(s.pic || '')}" alt=""
+            onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2256%22><rect width=%2256%22 height=%2256%22 fill=%22%23242433%22/><text x=%2228%22 y=%2234%22 font-size=%2222%22 text-anchor=%22middle%22 fill=%22%23666%22>♪</text></svg>'">
+          <div class="song-info">
+            <div class="title">${escapeHtml(s.title || '未命名')}</div>
+            <div class="subtitle">${escapeHtml(s.author || '未知')}</div>
+          </div>
+          <div class="action">
+            <button class="icon-btn" title="播放">▶</button>
+            <a class="icon-btn" href="${escapeAttr(s.link || '#')}" target="_blank" rel="noopener" title="原始链接">↗</a>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  content.querySelectorAll('.result-item').forEach(el => {
+    el.addEventListener('click', () => playSong(parseInt(el.dataset.idx)));
+  });
+}
+
+// ========== Play ==========
+function playSong(idx) {
+  if (idx < 0 || idx >= state.results.length) return;
+  if (idx === state.current && !audio.paused) {
+    // Toggle pause
+    togglePlay();
+    return;
+  }
+
+  state.current = idx;
+  const song = state.results[idx];
+
+  updatePlayerInfo(song);
+  updateLyrics(song);
+  highlightCurrent(idx);
+
+  audio.src = apiPath('/_api/audio', { url: song.url });
+  audio.load();
+
+  audio.play().catch(err => {
+    console.warn('Play failed:', err);
+    const item = document.querySelector(`.result-item[data-idx="${idx}"]`);
+    if (item) {
+      item.classList.add('error');
+      setTimeout(() => item.classList.remove('error'), 1500);
+    }
+    toast('⚠️ 无法播放（可能歌曲受版权限制）');
+  });
+}
+
+function togglePlay() {
+  if (!audio.src) return;
+  if (audio.paused) audio.play().catch(err => toast('播放失败: ' + err.message));
+  else audio.pause();
+}
+
+function updatePlayerInfo(song) {
+  playerTitle.textContent = song.title || '未命名';
+  playerArtist.textContent = song.author || '未知';
+  lyricsTitle.textContent = song.title || '未命名';
+  lyricsSubtitle.textContent = song.author || '未知';
+  if (song.pic) {
+    playerCover.src = song.pic;
+    playerCover.onerror = () => { playerCover.src = 'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2252%22 height=%2252%22><rect width=%2252%22 height=%2252%22 fill=%22%23242433%22/><text x=%2226%22 y=%2234%22 font-size=%2224%22 text-anchor=%22middle%22 fill=%22%23666%22>♪</text></svg>'; };
+  }
+  document.title = `♪ ${song.title} - ${song.author}`;
+}
+
+function updateLyrics(song) {
+  if (!song.lrc) {
+    lyricsBody.innerHTML = '<div class="lyric-empty">无歌词</div>';
+    state.lyrics = [];
+    state.lyricIndex = -1;
+    return;
+  }
+  const lines = song.lrc.split('\n')
+    .map(line => {
+      const m = line.match(/\[(\d+):(\d+(?:\.\d+)?)\](.*)/);
+      if (m) {
+        const time = parseFloat(m[1]) * 60 + parseFloat(m[2]);
+        return { time, text: m[3].trim() };
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
+
+  state.lyrics = lines;
+  state.lyricIndex = -1;
+
+  lyricsBody.innerHTML = lines.length
+    ? lines.map((l, i) => `<div class="lyric-line" data-idx="${i}" data-time="${l.time}">${escapeHtml(l.text) || '&nbsp;'}</div>`).join('')
+    : '<div class="lyric-empty">无有效歌词</div>';
+
+  lyricsBody.querySelectorAll('.lyric-line').forEach(el => {
+    el.addEventListener('click', () => {
+      audio.currentTime = parseFloat(el.dataset.time);
+      audio.play();
+    });
+  });
+}
+
+function highlightCurrent(idx) {
+  document.querySelectorAll('.result-item').forEach((el, i) => {
+    el.classList.toggle('playing', i === idx);
+  });
+}
+
+function updateLyricHighlight() {
+  if (!state.lyrics.length) return;
+  const t = audio.currentTime;
+  let idx = -1;
+  for (let i = state.lyrics.length - 1; i >= 0; i--) {
+    if (t >= state.lyrics[i].time) { idx = i; break; }
+  }
+  if (idx !== state.lyricIndex) {
+    state.lyricIndex = idx;
+    document.querySelectorAll('.lyric-line').forEach((el, i) => {
+      el.classList.toggle('active', i === idx);
+    });
+    if (idx >= 0) {
+      const el = document.querySelector('.lyric-line.active');
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+}
+
+// ========== Audio Events ==========
+audio.addEventListener('timeupdate', () => {
+  if (audio.duration) {
+    const pct = (audio.currentTime / audio.duration) * 100;
+    progressFill.style.width = pct + '%';
+    currentTime.textContent = fmtTime(audio.currentTime);
+    totalTime.textContent = fmtTime(audio.duration);
+  }
+  updateLyricHighlight();
+});
+
+audio.addEventListener('play', () => {
+  state.playing = true;
+  playBtn.textContent = '⏸';
+  playerCover.classList.remove('paused');
+});
+
+audio.addEventListener('pause', () => {
+  state.playing = false;
+  playBtn.textContent = '▶';
+  playerCover.classList.add('paused');
+});
+
+audio.addEventListener('ended', () => {
+  if (state.current < state.results.length - 1) {
+    playSong(state.current + 1);
+  } else {
+    toast('已到列表末尾');
+  }
+});
+
+audio.addEventListener('error', () => {
+  // If audio element itself has an error loading the proxy URL
+  if (audio.src && audio.networkState === 3) {
+    console.error('Audio error');
+  }
+});
+
+// ========== Controls ==========
+playBtn.addEventListener('click', togglePlay);
+prevBtn.addEventListener('click', () => {
+  if (state.current > 0) playSong(state.current - 1);
+  else if (audio.currentTime > 3) audio.currentTime = 0;
+});
+nextBtn.addEventListener('click', () => {
+  if (state.current < state.results.length - 1) playSong(state.current + 1);
+});
+
+progress.addEventListener('click', (e) => {
+  if (!audio.duration) return;
+  const rect = progress.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  audio.currentTime = pct * audio.duration;
+});
+
+volSlider.addEventListener('input', () => {
+  state.volume = parseFloat(volSlider.value);
+  audio.volume = state.volume;
+  volBtn.textContent = state.volume === 0 ? '🔇' : state.volume < 0.5 ? '🔉' : '🔊';
+});
+
+volBtn.addEventListener('click', () => {
+  state.volume = state.volume === 0 ? 0.7 : 0;
+  volSlider.value = state.volume;
+  audio.volume = state.volume;
+  volBtn.textContent = state.volume === 0 ? '🔇' : '🔊';
+});
+
+// ========== Keyboard ==========
+document.addEventListener('keydown', (e) => {
+  if (e.target === searchInput && e.key !== 'Enter') return;
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      togglePlay();
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      audio.currentTime = Math.max(0, audio.currentTime - 5);
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 5);
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      nextBtn.click();
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      prevBtn.click();
+      break;
+    case 'Enter':
+      if (e.target === searchInput) doSearch();
+      break;
+  }
+});
+
+// ========== Search events ==========
+searchBtn.addEventListener('click', doSearch);
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+// ========== Utils ==========
+function fmtTime(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  const ss = Math.floor(s % 60);
+  return `${m}:${ss.toString().padStart(2, '0')}`;
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(str) { return escapeHtml(str); }
+
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toastEl.classList.remove('show'), 2800);
+}
+
+// ========== Start ==========
+renderSourceTabs();
+renderSuggests();
+</script>
+</body>
+</html>
