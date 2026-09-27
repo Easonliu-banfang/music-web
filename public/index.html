@@ -632,7 +632,17 @@ function playSong(idx) {
   updateLyrics(song);
   highlightCurrent(idx);
 
-  audio.src = apiPath('/_api/audio', { url: song.url });
+  // 音频走「浏览器直连」：和 itzo 一致，由用户浏览器从中国 IP 直连网易云/一听，
+  // 绕开 Cloudflare Worker 海外边缘被网易云地域封锁（海外节点拿到的是拦截页/"没有版权"）。
+  // 若直连失败（混合内容被拦等），回退到 Worker 代理（服务端把 http 升级为 https）。
+  audio.onerror = () => {
+    console.warn('直连播放失败，回退 Worker 代理:', song.url);
+    audio.onerror = null; // 防止回退也失败时死循环
+    audio.src = apiPath('/_api/audio', { url: song.url });
+    audio.load();
+    audio.play().catch(() => toast('⚠️ 无法播放（可能歌曲受版权限制）'));
+  };
+  audio.src = song.url;
   audio.load();
 
   audio.play().catch(err => {
